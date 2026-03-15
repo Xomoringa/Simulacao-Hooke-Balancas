@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Lei de Hooke e Balanças</title>
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        background: #f0f0f0;
+    }
+
+    canvas {
+        background: white;
+        border: 2px solid black;
+        margin: 10px;
+        box-shadow: 3px 3px 10px rgba(0,0,0,0.2);
+    }
+
+    .controls {
+        font-size: 18px;
+        margin: 10px;
+        padding: 15px;
+        background: #e0e0e0;
+        border-radius: 8px;
+        display: inline-block;
+        text-align: left;
+    }
+
+    .seletor-modo {
+        background: #d4e6f1;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 15px;
+        font-weight: bold;
+        text-align: center;
+    }
+
+    .painel-digital {
+        display: none; /* Escondido por padrão, ativado via JS */
+        background-color: #222;
+        padding: 10px;
+        margin: 10px auto;
+        width: 300px;
+        border: 4px solid #444;
+        border-radius: 5px;
+        box-shadow: inset 0px 0px 10px #000;
+    }
+
+    .visor {
+        color: #0f0; 
+        font-family: "Courier New", Courier, monospace;
+        font-size: 24px;
+        margin-bottom: 5px;
+    }
+
+    .sinal-eletrico {
+        color: #ffaa00;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 14px;
+        border-top: 1px dashed #555;
+        padding-top: 5px;
+    }
+
+    .alerta-container {
+        height: 30px; 
+        margin-bottom: 5px;
+    }
+
+    .alerta {
+        color: #d00;
+        font-weight: bold;
+        font-size: 20px;
+        display: none;
+        background: #ffcccc;
+        padding: 5px;
+        border-radius: 5px;
+        border: 1px solid #d00;
+    }
+</style>
+
+</head>
+
+<body>
+
+<h2>Simulação: De Hooke às Balanças</h2>
+
+<div class="controls">
+    <div class="seletor-modo">
+        Tipo de Balança:<br>
+        <input type="radio" name="modo" value="mecanica" id="modoMec" checked> Mecânica (Escala Visual)
+        &nbsp;&nbsp;
+        <input type="radio" name="modo" value="digital" id="modoDig"> Digital (Célula de Carga)
+    </div>
+
+    Massa (kg):
+    <input type="range" min="0" max="5" step="0.1" value="1" id="massa">
+    <span id="mvalor" style="display:inline-block; width:40px; font-weight:bold;">1.0</span> 
+    <br><br>
+    Constante k da mola (N/m):
+    <input type="range" min="5" max="50" step="1" value="20" id="k">
+    <span id="kvalor" style="display:inline-block; width:40px; font-weight:bold;">20</span> 
+</div>
+
+<div class="painel-digital" id="painelDigital">
+    <div class="visor">Massa: <span id="leitura">0.00</span> kg</div>
+    <div class="sinal-eletrico">Sinal do Extensômetro: <span id="sinalMv">0.00</span> mV</div>
+</div>
+
+<div class="alerta-container">
+    <span id="msgAlerta" class="alerta">⚠ Limite Elástico Excedido! Mola danificada.</span>
+</div>
+
+<p id="info" style="font-size: 16px; font-weight: bold;"></p>
+
+<div>
+    <canvas id="sim" width="400" height="500"></canvas>
+    <canvas id="graf" width="500" height="500"></canvas>
+</div>
+
+<script>
+    let sim = document.getElementById("sim");
+    let ctx = sim.getContext("2d");
+
+    let graf = document.getElementById("graf");
+    let gctx = graf.getContext("2d");
+
+    let massa = document.getElementById("massa");
+    let kval = document.getElementById("k");
+
+    let mvalor = document.getElementById("mvalor");
+    let kvalor = document.getElementById("kvalor");
+    
+    let painelDigital = document.getElementById("painelDigital");
+    let leituraVisor = document.getElementById("leitura");
+    let sinalMv = document.getElementById("sinalMv");
+    
+    let msgAlerta = document.getElementById("msgAlerta");
+    let info = document.getElementById("info");
+
+    let radiosModo = document.getElementsByName("modo");
+
+    let g = 9.8;
+    let limite_elastico = 4.5; 
+
+    function desenharMola(x, y, L, estourou) {
+        ctx.beginPath();
+        let n = 16;
+        let passo = L / n;
+        ctx.moveTo(x, y);
+
+        for (let i = 0; i < n; i++) {
+            let dx = (i % 2 == 0) ? -15 : 15;
+            if (estourou) { dx += (Math.random() * 10 - 5); }
+            ctx.lineTo(x + dx, y + i * passo);
+        }
+        ctx.lineTo(x, y + L);
+        ctx.strokeStyle = estourou ? "red" : "black";
+        ctx.lineWidth = estourou ? 1.5 : 2;
+        ctx.stroke();
+    }
+
+    function desenharEscalaMecanica(x_base, y_base, k) {
+        ctx.fillStyle = "black";
+        ctx.font = "12px Arial";
+        ctx.beginPath();
+        ctx.moveTo(x_base, y_base);
+        ctx.lineTo(x_base, y_base + 300);
+        ctx.stroke();
+
+        // Desenha as marcações de 0 a 5 kg baseadas no k atual
+        for(let i = 0; i <= 5; i++) {
+            let deformacao_kg = (i * g) / k;
+            let y_marca = y_base + (deformacao_kg * 30);
+            
+            if(y_marca < 480) { // Mantém dentro do canvas
+                ctx.beginPath();
+                ctx.moveTo(x_base, y_marca);
+                ctx.lineTo(x_base + 10, y_marca);
+                ctx.stroke();
+                ctx.fillText(i + " kg", x_base + 15, y_marca + 4);
+            }
+        }
+    }
+
+    function desenharSeta(ctx, x1, y1, x2, y2) {
+        ctx.beginPath();
+        ctx.strokeStyle = "black";
+        ctx.lineWidth = 2;
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        let ang = Math.atan2(y2 - y1, x2 - x1);
+        let size = 10;
+        ctx.lineTo(x2 - size * Math.cos(ang - Math.PI / 6), y2 - size * Math.sin(ang - Math.PI / 6));
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - size * Math.cos(ang + Math.PI / 6), y2 - size * Math.sin(ang + Math.PI / 6));
+        ctx.stroke();
+    }
+
+    function desenharGrafico(k, m_atual, limite) {
+        gctx.clearRect(0, 0, 500, 500);
+        let ox = 60, oy = 450;
+
+        desenharSeta(gctx, ox, oy, 450, oy); 
+        desenharSeta(gctx, ox, oy, ox, 40);  
+
+        gctx.fillStyle = "black";
+        gctx.font = "16px Arial";
+        gctx.fillText("Deformação x (m)", 320, 480);
+        gctx.fillText("Força F (N)", 10, 30);
+
+        gctx.beginPath();
+        for (let i = 0; i < 350; i++) {
+            let x_graf = i / 40; 
+            let F_graf = k * x_graf;
+            let px = ox + i;
+            let py = oy - F_graf * 6; 
+
+            if (i == 0) gctx.moveTo(px, py);
+            else {
+                if (x_graf > limite) {
+                   py = oy - (k * limite)*6 + (x_graf - limite)*20; 
+                   gctx.strokeStyle = "red";
+                } else { gctx.strokeStyle = "blue"; }
+                gctx.lineTo(px, py);
+            }
+        }
+        gctx.stroke();
+
+        let x_atual = (m_atual * g) / k;
+        let px_atual = ox + (x_atual * 40);
+        let py_atual = oy - (m_atual * g * 6);
+        if (x_atual > limite) { py_atual = oy - (k * limite)*6 + (x_atual - limite)*20; }
+
+        gctx.beginPath();
+        gctx.arc(px_atual, py_atual, 6, 0, Math.PI * 2);
+        gctx.fillStyle = x_atual > limite ? "red" : "green";
+        gctx.fill();
+        gctx.stroke();
+    }
+
+    function atualizar() {
+        let m = parseFloat(massa.value);
+        let k = parseFloat(kval.value);
+        let modo = document.querySelector('input[name="modo"]:checked').value;
+
+        mvalor.innerHTML = m.toFixed(1);
+        kvalor.innerHTML = k;
+
+        let F = m * g;
+        let x = F / k;
+        let estourou = x > limite_elastico;
+
+        // Atualiza UI baseada no modo
+        if (modo === "digital") {
+            painelDigital.style.display = "block";
+            if (estourou) {
+                leituraVisor.innerText = "ERR";
+                sinalMv.innerText = "SOBRECARGA";
+            } else {
+                leituraVisor.innerText = m.toFixed(2);
+                // Simula um sinal elétrico proporcional à força (ex: 2.5 mV por Newton)
+                let tensaoExtensometro = F * 2.5; 
+                sinalMv.innerText = "+" + tensaoExtensometro.toFixed(2);
+            }
+        } else {
+            painelDigital.style.display = "none";
+        }
+
+        msgAlerta.style.display = estourou ? "inline-block" : "none";
+
+        let deform = x * 30; 
+        ctx.clearRect(0, 0, 400, 500);
+
+        // Suporte
+        ctx.fillStyle = "#555";
+        ctx.fillRect(160, 20, 80, 10);
+
+        // Escala Mecânica (se ativada)
+        if (modo === "mecanica") {
+            desenharEscalaMecanica(280, 150, k);
+        }
+
+        // Mola
+        desenharMola(200, 30, 120 + deform, estourou);
+
+        // Bloco de Massa
+        let y = 150 + deform;
+        ctx.fillStyle = estourou ? "#d00" : "#0066cc";
+        ctx.fillRect(170, y, 60, 40);
+        
+        // Ponteiro da escala mecânica
+        if (modo === "mecanica") {
+            ctx.beginPath();
+            ctx.moveTo(230, y + 20); // Sai do meio do bloco
+            ctx.lineTo(275, y + 20); // Aponta para a escala
+            ctx.strokeStyle = "red";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = "white";
+        ctx.font = "14px Arial";
+        ctx.fillText(m.toFixed(1) + "kg", 182, y + 25);
+
+        info.innerHTML = "Força Peso (F) = " + F.toFixed(2) + " N &nbsp;&nbsp;|&nbsp;&nbsp; Deformação (x) = " + x.toFixed(2) + " m";
+
+        desenharGrafico(k, m, limite_elastico);
+    }
+
+    massa.oninput = atualizar;
+    kval.oninput = atualizar;
+    
+    // Atualiza quando troca o radio button
+    for(let i=0; i<radiosModo.length; i++){
+        radiosModo[i].addEventListener('change', atualizar);
+    }
+
+    atualizar();
+
+</script>
+
+</body>
+</html>
